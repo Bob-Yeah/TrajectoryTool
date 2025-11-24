@@ -574,7 +574,7 @@ def extract_data(lines):
     norm_cal = []
     if (len(points) > 0):
         # points_clean, norm_cal = HandPR.delete_outliers(points, puncture_norm, puncture_center)
-        points_clean, norm_cal = HandPR.ransac_trajectory_cutting(points,100,0.03)
+        points_clean, norm_cal = HandPR.ransac_trajectory_cutting(points,100,0.01,0.03)
     return points, points_clean, puncture_norm, puncture_center, norm_cal
 
 def main():
@@ -599,7 +599,7 @@ def main():
 
         if (len(points_clean) > 0):
             # 轨迹评判
-            _,_,_=TranslatedFunctions.clean_trajectory_check2(points_clean, puncture_plane_norm)
+            _,_,_=TranslatedFunctions.clean_trajectory_check2(points_clean, normal_cal)
             
             normals.append([puncture_plane_norm.x, puncture_plane_norm.y, puncture_plane_norm.z])
             normals.append([normal_cal.x, normal_cal.y, normal_cal.z])

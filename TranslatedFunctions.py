@@ -1,7 +1,7 @@
 from typing import List, Tuple
 import math
 import random
-from HandPR import Vector3, calculate_mean, fit_plane
+from HandPR import Vector3, calculate_mean, fit_plane, calculate_gaussian_parameters
 
 # 模拟CalculateOperationPlane函数，返回中心点和平面参数
 def calculate_operation_plane(points: List[Vector3]) -> Tuple[Vector3, Tuple[float, float, float, float]]:
@@ -159,12 +159,16 @@ def clean_trajectory_check2(points: List[Vector3], puncture_plane_norm: Vector3)
         prev_vector_in_plane = to_center
         end_vector_in_plane = to_center
     
+    gaussian_center, std_radius = calculate_gaussian_parameters(radius)
+    Logger.log("Hand", f"高斯中心: {gaussian_center:.4f}")
+    Logger.log("Hand", f"标准差半径: {std_radius:.4f}")
+
     # 对半径排序
     radius_sorted = sorted(radius)
     
-    percentile_20 = int(len(radius_sorted) * 0.25)
+    percentile_20 = int(len(radius_sorted) * 0.3)
     
-    Logger.log("Hand", f"从中心点开始？{first_radius}, 25分位半径: {radius_sorted[percentile_20]}")
+    Logger.log("Hand", f"从中心点开始？{first_radius}, 30分位半径: {radius_sorted[percentile_20]}")
     if first_radius > radius_sorted[percentile_20]:
         good_flag = False
         Logger.log("Hand", "消毒错误，没有从中心点开始")

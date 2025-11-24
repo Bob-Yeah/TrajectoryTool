@@ -122,8 +122,8 @@ def count_inliers(points: List[Vector3], plane_coeffs: tuple, threshold: float) 
         if distance <= threshold:
             inliers_count += 1
     
-    inliers_ratio = inliers_count / (float)(len(points)) if points else 0.0
-    # print("inliers_count:", inliers_count, "inliers_ratio:", (float)(len(points)))
+    inliers_ratio = inliers_count / (len(points)) if points else 0.0
+    # print("inliers_count:", inliers_count, "len(points):", (float)(len(points)))
     
     return inliers_count, inliers_ratio
 
@@ -152,8 +152,10 @@ def ransac_plane_fitting(points: List[Vector3], iterations: int = 100, threshold
     for i in range(iterations):
         try:
             # 随机选择三个不同的点
-            sample_indices = random.sample(range(len(points)), 3)
-            p1, p2, p3 = points[sample_indices[0]], points[sample_indices[1]], points[sample_indices[2]]
+            sample_indices = random.sample(range(len(points)//3), 3)
+            # sample_indices = random.sample(range(len(points)), 3)
+            p1, p2, p3 = points[sample_indices[0]], points[sample_indices[1]+len(points)//3], points[sample_indices[2]+2*len(points)//3]
+            # p1, p2, p3 = points[sample_indices[0]], points[sample_indices[1]], points[sample_indices[2]]
             
             # 计算通过这三个点的平面
             A, B, C, D, centroid = calculate_plane_from_three_points(p1, p2, p3)
@@ -199,10 +201,13 @@ def determine_trajectory_cut_range(points: List[Vector3], best_plane: tuple, thr
         (start_idx, end_idx): 切割后的起始和结束索引
     """
     n = len(points)
-    
+
     # 计算每个点到平面的距离
     distances = [calculate_distance_to_plane(point, best_plane) for point in points]
     
+    gaussian_center, std_radius = calculate_gaussian_parameters(distances)
+    print("gaussian_center:", gaussian_center, "std_radius:", std_radius)
+
     # 找到连续内点区域的结束索引
     distance_sign = 1
     if (distances[-1] < 0):
@@ -210,7 +215,15 @@ def determine_trajectory_cut_range(points: List[Vector3], best_plane: tuple, thr
     else:
         distance_sign = 1
     abs_distances = [abs(distance) for distance in distances]
-    test_threshold = min(threshold, 0.25 * max(abs_distances))
+    
+    test_threshold = min(threshold, std_radius)
+
+    idx =0 
+    for distance in abs_distances:
+        if distance < std_radius:
+            print("in distance:", distance, ", std:", std_radius,",index:", idx, ",n:", n)
+        idx += 1
+
     # 标记内点
     is_inlier = [distance <= test_threshold for distance in abs_distances]
     is_inlier_end = []
@@ -227,7 +240,13 @@ def determine_trajectory_cut_range(points: List[Vector3], best_plane: tuple, thr
     end_idx = n-1
     while end_idx > (int)(n*0.8) and not is_inlier_end[end_idx]:
         end_idx -= 1
-    # print("distance_sign:",distance_sign, "test_threshold", test_threshold, "start_idx:" , start_idx,"end_idx:" , end_idx, ",n:" , n)
+
+    while (abs_distances[start_idx] > abs_distances[start_idx+1]):
+        start_idx += 1
+
+    print("distance_sign:",distance_sign, "test_threshold", test_threshold, "start_idx:" , start_idx,"end_idx:" , end_idx, ",n:" , n)
+    print("start distance:", distances[start_idx], "end distance:", distances[end_idx])
+
     # 确保索引有效
     if start_idx > end_idx:
         # 如果没有足够的内点，返回整个范围
@@ -236,7 +255,7 @@ def determine_trajectory_cut_range(points: List[Vector3], best_plane: tuple, thr
     
     return start_idx, end_idx
 
-def ransac_trajectory_cutting(points: List[Vector3], ransac_iterations: int = 100, distance_threshold: float = 0.03) -> tuple:
+def ransac_trajectory_cutting(points: List[Vector3], ransac_iterations: int = 100, ransacdistance_threshold: float = 0.01, cutdistance_threshold: float = 0.03) -> tuple:
     """
     使用RANSAC思想进行轨迹头尾切割
     
@@ -264,7 +283,7 @@ def ransac_trajectory_cutting(points: List[Vector3], ransac_iterations: int = 10
     
     # 使用RANSAC拟合最优平面
     best_plane, best_centroid, best_inliers_count, best_inliers_ratio = \
-        ransac_plane_fitting(middle_points, ransac_iterations, distance_threshold)
+        ransac_plane_fitting(middle_points, ransac_iterations, ransacdistance_threshold)
     
     # 如果RANSAC失败，使用中间点集的拟合结果
     if best_plane is None:
@@ -275,14 +294,15 @@ def ransac_trajectory_cutting(points: List[Vector3], ransac_iterations: int = 10
     best_normal = Vector3(A, B, C)
     
     # 在原始点集中确定切割范围
-    start_idx, end_idx = determine_trajectory_cut_range(points, best_plane, distance_threshold)
+    start_idx, end_idx = determine_trajectory_cut_range(points, best_plane, cutdistance_threshold)
     
     # 获取切割后的轨迹点
     filtered_points = points[start_idx:end_idx+1] if start_idx <= end_idx else points
     
-    best_plane, _, _, _, best_centroid = fit_plane(filtered_points)
-    best_normal = Vector3(A, B, C)
+    # best_plane, _, _, _, best_centroid = fit_plane(filtered_points)
+    # best_normal = Vector3(A, B, C)
 
+    print("best_normal:", best_normal.x,"," , best_normal.y, ",", best_normal.z)
     return filtered_points, best_normal
 
 import random
@@ -397,6 +417,36 @@ def get_reverse_distance(points: Vector3) -> List[float]:
         to_center = point - center_point
         distance_to_plane.append(abs(to_center.magnitude()))
     return distance_to_plane[::-1]
+
+def calculate_gaussian_parameters(values: List[float]) -> tuple:
+    """
+    快速计算一组点的高斯中心与半径值
+    
+    参数:
+        values: Vector3点集列表
+    
+    返回:
+        (gaussian_center, std_radius, max_radius, mean_radius):
+        高斯中心(质心)、标准差半径
+    """
+    if not values:
+        raise ValueError("集不能为空")
+    
+    gaussian_center = sum(values) / len(values)
+    # 计算每个点到中心的距离
+    distances = []
+    for point in values:
+        to_center = point - gaussian_center
+        distance = abs(to_center)
+        distances.append(distance)
+    
+    # 计算标准差半径
+    mean_distance = sum(distances) / len(distances)
+    
+    variance = sum((d - mean_distance) ** 2 for d in distances) / len(distances)
+    std_radius = math.sqrt(variance)
+    return gaussian_center, std_radius
+
 def detect_inflection_index(points,window_size = 5,threshold = 0.2):
     if len(points) < window_size:
         return 0
